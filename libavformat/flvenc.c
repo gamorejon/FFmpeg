@@ -21,6 +21,7 @@
 
 #include "libavutil/intreadwrite.h"
 #include "libavutil/dict.h"
+#include "libavutil/opt.h"
 #include "libavutil/intfloat.h"
 #include "libavutil/avassert.h"
 #include "avc.h"
@@ -58,6 +59,7 @@ static const AVCodecTag flv_audio_codec_ids[] = {
 };
 
 typedef struct FLVContext {
+    const   AVClass *av_class;
     int     reserved;
     int64_t duration_offset;
     int64_t filesize_offset;
@@ -68,6 +70,19 @@ typedef struct FLVContext {
 typedef struct FLVStreamContext {
     int64_t last_ts;    ///< last timestamp for each stream
 } FLVStreamContext;
+
+static const AVOption options[] = {
+    { "flv_copyts", "dont offset dts/pts",
+      offsetof(FLVContext, copyts), AV_OPT_TYPE_INT, {.i64=-1}, -1, 1, AV_OPT_FLAG_ENCODING_PARAM},
+    { NULL },
+};
+
+static const AVClass flv_muxer_class = {
+    .class_name     = "FLV muxer",
+    .item_name      = av_default_item_name,
+    .option         = options,
+    .version        = LIBAVUTIL_VERSION_INT,
+};
 
 static int get_audio_flags(AVFormatContext *s, AVCodecContext *enc)
 {
@@ -193,6 +208,27 @@ static void put_amf_bool(AVIOContext *pb, int b)
 
 static int flv_write_header(AVFormatContext *s)
 {
+    FLVContext *flv = s->priv_data;
+    int i;
+
+    for (i = 0; i < s->nb_streams; i++) {
+        FLVStreamContext *sc;
+        avpriv_set_pts_info(s->streams[i], 32, 1, 1000); /* 32 bit pts in ms */
+
+        sc = av_mallocz(sizeof(FLVStreamContext));
+        if (!sc)
+            return AVERROR(ENOMEM);
+        s->streams[i]->priv_data = sc;
+        sc->last_ts = -1;
+    }
+
+    flv->delay = AV_NOPTS_VALUE;
+
+    return 0;
+}
+
+static int flv_write_init_packets(AVFormatContext *s, int64_t ts)
+{
     AVIOContext *pb = s->pb;
     FLVContext *flv = s->priv_data;
     AVCodecContext *audio_enc = NULL, *video_enc = NULL, *data_enc = NULL;
@@ -200,10 +236,11 @@ static int flv_write_header(AVFormatContext *s)
     double framerate = 0.0;
     int64_t metadata_size_pos, data_size, metadata_count_pos;
     AVDictionaryEntry *tag = NULL;
+    unsigned int lts = ts;
+    int hts = (ts >> 24) & 0x7F;
 
     for (i = 0; i < s->nb_streams; i++) {
         AVCodecContext *enc = s->streams[i]->codec;
-        FLVStreamContext *sc;
         switch (enc->codec_type) {
         case AVMEDIA_TYPE_VIDEO:
             if (s->streams[i]->avg_frame_rate.den &&
@@ -237,16 +274,7 @@ static int flv_write_header(AVFormatContext *s)
                    av_get_media_type_string(enc->codec_type), i);
             return AVERROR(EINVAL);
         }
-        avpriv_set_pts_info(s->streams[i], 32, 1, 1000); /* 32 bit pts in ms */
-
-        sc = av_mallocz(sizeof(FLVStreamContext));
-        if (!sc)
-            return AVERROR(ENOMEM);
-        s->streams[i]->priv_data = sc;
-        sc->last_ts = -1;
     }
-
-    flv->delay = AV_NOPTS_VALUE;
 
     avio_write(pb, "FLV", 3);
     avio_w8(pb, 1);
@@ -259,8 +287,9 @@ static int flv_write_header(AVFormatContext *s)
         if (s->streams[i]->codec->codec_tag == 5) {
             avio_w8(pb, 8);     // message type
             avio_wb24(pb, 0);   // include flags
-            avio_wb24(pb, 0);   // time stamp
-            avio_wb32(pb, 0);   // reserved
+            avio_wb24(pb, lts); // time stamp
+            avio_w8(pb, hts);   // reserved
+            avio_wb24(pb, 0);   // reserved
             avio_wb32(pb, 11);  // size
             flv->reserved = 5;
         }
@@ -381,8 +410,8 @@ static int flv_write_header(AVFormatContext *s)
             avio_w8(pb, enc->codec_type == AVMEDIA_TYPE_VIDEO ?
                     FLV_TAG_TYPE_VIDEO : FLV_TAG_TYPE_AUDIO);
             avio_wb24(pb, 0); // size patched later
-            avio_wb24(pb, 0); // ts
-            avio_w8(pb, 0);   // ts ext
+            avio_wb24(pb, lts); // ts
+            avio_w8(pb, hts);   // ts ext
             avio_wb24(pb, 0); // streamid
             pos = avio_tell(pb);
             if (enc->codec_id == AV_CODEC_ID_AAC) {
@@ -417,7 +446,7 @@ static int flv_write_trailer(AVFormatContext *s)
     /* Add EOS tag */
     for (i = 0; i < s->nb_streams; i++) {
         AVCodecContext *enc = s->streams[i]->codec;
-        FLVStreamContext *sc = s->streams[i]->priv_data;
+        FLVStreamContext *sc;
         if (enc->codec_type == AVMEDIA_TYPE_VIDEO &&
                 (enc->codec_id == AV_CODEC_ID_H264 || enc->codec_id == AV_CODEC_ID_MPEG4))
             put_avc_eos_tag(pb, sc->last_ts);
@@ -449,6 +478,15 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
     int size = pkt->size;
     uint8_t *data = NULL;
     int flags = -1, flags_size, ret;
+
+    if (!flv->init_packets_sent) {
+        ret = flv_write_init_packets(s, flv->copyts < 0 ? 0 : pkt->dts);
+        if (ret)
+            return ret;
+        flv->init_packets_sent = 1;
+    }
+
+    sc = s->streams[pkt->stream_index]->priv_data;
 
     if (enc->codec_id == AV_CODEC_ID_VP6 || enc->codec_id == AV_CODEC_ID_VP6F ||
         enc->codec_id == AV_CODEC_ID_VP6A || enc->codec_id == AV_CODEC_ID_AAC)
@@ -511,7 +549,9 @@ static int flv_write_packet(AVFormatContext *s, AVPacket *pkt)
         return AVERROR(EINVAL);
     }
 
-    ts = pkt->dts + flv->delay; // add delay to force positive dts
+    ts = pkt->dts;
+    if (flv->copyts < 0)
+        ts += flv->delay; // add delay to force positive dts
 
     /* check Speex packet duration */
     if (enc->codec_id == AV_CODEC_ID_SPEEX && ts - sc->last_ts > 160)
@@ -591,4 +631,5 @@ AVOutputFormat ff_flv_muxer = {
                       },
     .flags          = AVFMT_GLOBALHEADER | AVFMT_VARIABLE_FPS |
                       AVFMT_TS_NONSTRICT,
+    .priv_class     = &flv_muxer_class
 };
