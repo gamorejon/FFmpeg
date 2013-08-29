@@ -65,6 +65,8 @@ typedef struct FLVContext {
     int64_t filesize_offset;
     int64_t duration;
     int64_t delay;      ///< first dts delay (needed for AVC & Speex)
+    int     copyts;
+    int     init_packets_sent;
 } FLVContext;
 
 typedef struct FLVStreamContext {
