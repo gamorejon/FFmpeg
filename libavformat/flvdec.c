@@ -919,5 +919,6 @@ AVInputFormat ff_flv_demuxer = {
     .read_seek      = flv_read_seek,
     .read_close     = flv_read_close,
     .extensions     = "flv",
+    .flags          = AVFMT_TS_DISCONT,
     .priv_class     = &class,
 };
