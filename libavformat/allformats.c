@@ -254,6 +254,7 @@ void av_register_all(void)
     REGISTER_DEMUXER (SEGAFILM,         segafilm);
     REGISTER_MUXER   (SEGMENT,          segment);
     REGISTER_MUXER   (SEGMENT,          stream_segment);
+    REGISTER_MUXER   (SEGMENT,          zmq_segment);
     REGISTER_DEMUXER (SHORTEN,          shorten);
     REGISTER_DEMUXER (SIFF,             siff);
     REGISTER_DEMUXER (SMACKER,          smacker);
