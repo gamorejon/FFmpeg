@@ -831,3 +831,21 @@ AVOutputFormat ff_stream_segment_muxer = {
     .write_trailer  = seg_write_trailer,
     .priv_class     = &sseg_class,
 };
+
+static const AVClass zseg_class = {
+    .class_name = "zmq_segment muxer",
+    .item_name  = av_default_item_name,
+    .option     = options,
+    .version    = LIBAVUTIL_VERSION_INT,
+};
+
+AVOutputFormat ff_zmq_segment_muxer = {
+    .name           = "zmq_segment,zsegment",
+    .long_name      = NULL_IF_CONFIG_SMALL("ZeroMQ segment muxer"),
+    .priv_data_size = sizeof(SegmentContext),
+    .flags          = AVFMT_NOFILE,
+    .write_header   = seg_write_header,
+    .write_packet   = seg_write_packet,
+    .write_trailer  = seg_write_trailer,
+    .priv_class     = &zseg_class,
+};
