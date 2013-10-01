@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2012 Clément Bœsch <ubitux@gmail.com>
+ * Copyright (c) 2012 Clément Bœsch <u pkh me>
  *
  * This file is part of FFmpeg.
  *
@@ -25,7 +25,6 @@
 
 #include <float.h> /* DBL_MAX */
 
-#include "libavutil/channel_layout.h"
 #include "libavutil/opt.h"
 #include "libavutil/timestamp.h"
 #include "audio.h"
@@ -49,26 +48,10 @@ static const AVOption silencedetect_options[] = {
     { "noise",     "set noise tolerance",              OFFSET(noise),     AV_OPT_TYPE_DOUBLE, {.dbl=0.001},          0, DBL_MAX,  FLAGS },
     { "d",         "set minimum duration in seconds",  OFFSET(duration),  AV_OPT_TYPE_DOUBLE, {.dbl=2.},             0, 24*60*60, FLAGS },
     { "duration",  "set minimum duration in seconds",  OFFSET(duration),  AV_OPT_TYPE_DOUBLE, {.dbl=2.},             0, 24*60*60, FLAGS },
-    { NULL },
+    { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(silencedetect);
-
-static av_cold int init(AVFilterContext *ctx, const char *args)
-{
-    int ret;
-    SilenceDetectContext *silence = ctx->priv;
-
-    silence->class = &silencedetect_class;
-    av_opt_set_defaults(silence);
-
-    if ((ret = av_set_options_string(silence, args, "=", ":")) < 0)
-        return ret;
-
-    av_opt_free(silence);
-
-    return 0;
-}
 
 static char *get_metadata_val(AVFrame *insamples, const char *key)
 {
@@ -80,7 +63,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
 {
     int i;
     SilenceDetectContext *silence = inlink->dst->priv;
-    const int nb_channels           = av_get_channel_layout_nb_channels(inlink->channel_layout);
+    const int nb_channels           = inlink->channels;
     const int srate                 = inlink->sample_rate;
     const int nb_samples            = insamples->nb_samples     * nb_channels;
     const int64_t nb_samples_notify = srate * silence->duration * nb_channels;
@@ -156,10 +139,9 @@ static int query_formats(AVFilterContext *ctx)
 
 static const AVFilterPad silencedetect_inputs[] = {
     {
-        .name             = "default",
-        .type             = AVMEDIA_TYPE_AUDIO,
-        .get_audio_buffer = ff_null_get_audio_buffer,
-        .filter_frame     = filter_frame,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_AUDIO,
+        .filter_frame = filter_frame,
     },
     { NULL }
 };
@@ -176,7 +158,6 @@ AVFilter avfilter_af_silencedetect = {
     .name          = "silencedetect",
     .description   = NULL_IF_CONFIG_SMALL("Detect silence."),
     .priv_size     = sizeof(SilenceDetectContext),
-    .init          = init,
     .query_formats = query_formats,
     .inputs        = silencedetect_inputs,
     .outputs       = silencedetect_outputs,

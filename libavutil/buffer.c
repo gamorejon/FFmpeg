@@ -125,6 +125,16 @@ int av_buffer_is_writable(const AVBufferRef *buf)
     return avpriv_atomic_int_get(&buf->buffer->refcount) == 1;
 }
 
+void *av_buffer_get_opaque(const AVBufferRef *buf)
+{
+    return buf->buffer->opaque;
+}
+
+int av_buffer_get_ref_count(const AVBufferRef *buf)
+{
+    return buf->buffer->refcount;
+}
+
 int av_buffer_make_writable(AVBufferRef **pbuf)
 {
     AVBufferRef *newbuf, *buf = *pbuf;
@@ -278,7 +288,7 @@ static void pool_release_buffer(void *opaque, uint8_t *data)
     AVBufferPool *pool = buf->pool;
 
     if(CONFIG_MEMORY_POISONING)
-        memset(buf->data, 0x2a, pool->size);
+        memset(buf->data, FF_MEMORY_POISON, pool->size);
 
     add_to_pool(buf);
     if (!avpriv_atomic_int_add_and_fetch(&pool->refcount, -1))

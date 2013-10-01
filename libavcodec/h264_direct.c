@@ -32,7 +32,6 @@
 #include "rectangle.h"
 #include "thread.h"
 
-//#undef NDEBUG
 #include <assert.h>
 
 
@@ -209,6 +208,7 @@ static void pred_spatial_direct_motion(H264Context * const h, int *mb_type){
                     mv[list]= AV_RN32A(C);
                 }
             }
+            av_assert2(ref[list] < (h->ref_count[list] << !!FRAME_MBAFF(h)));
         }else{
             int mask= ~(MB_TYPE_L0 << (2*list));
             mv[list] = 0;

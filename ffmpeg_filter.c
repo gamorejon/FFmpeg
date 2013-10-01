@@ -21,7 +21,6 @@
 #include "ffmpeg.h"
 
 #include "libavfilter/avfilter.h"
-#include "libavfilter/avfiltergraph.h"
 #include "libavfilter/buffersink.h"
 
 #include "libavresample/avresample.h"
@@ -110,7 +109,7 @@ static char *choose_pix_fmts(OutputStream *ost)
         int len;
 
         if (avio_open_dyn_buf(&s) < 0)
-            exit(1);
+            exit_program(1);
 
         p = ost->enc->pix_fmts;
         if (ost->st->codec->strict_std_compliance <= FF_COMPLIANCE_UNOFFICIAL) {
@@ -124,7 +123,7 @@ static char *choose_pix_fmts(OutputStream *ost)
 
         for (; *p != AV_PIX_FMT_NONE; p++) {
             const char *name = av_get_pix_fmt_name(*p);
-            avio_printf(s, "%s:", name);
+            avio_printf(s, "%s|", name);
         }
         len = avio_close_dyn_buf(s, &ret);
         ret[len - 1] = 0;
@@ -135,7 +134,7 @@ static char *choose_pix_fmts(OutputStream *ost)
 
 /* Define a function for building a string containing a list of
  * allowed formats. */
-#define DEF_CHOOSE_FORMAT(type, var, supported_list, none, get_name, separator)\
+#define DEF_CHOOSE_FORMAT(type, var, supported_list, none, get_name)           \
 static char *choose_ ## var ## s(OutputStream *ost)                            \
 {                                                                              \
     if (ost->st->codec->var != none) {                                         \
@@ -148,11 +147,11 @@ static char *choose_ ## var ## s(OutputStream *ost)                            \
         int len;                                                               \
                                                                                \
         if (avio_open_dyn_buf(&s) < 0)                                         \
-            exit(1);                                                           \
+            exit_program(1);                                                           \
                                                                                \
         for (p = ost->enc->supported_list; *p != none; p++) {                  \
             get_name(*p);                                                      \
-            avio_printf(s, "%s" separator, name);                              \
+            avio_printf(s, "%s|", name);                                       \
         }                                                                      \
         len = avio_close_dyn_buf(s, &ret);                                     \
         ret[len - 1] = 0;                                                      \
@@ -162,28 +161,28 @@ static char *choose_ ## var ## s(OutputStream *ost)                            \
 }
 
 // DEF_CHOOSE_FORMAT(enum AVPixelFormat, pix_fmt, pix_fmts, AV_PIX_FMT_NONE,
-//                   GET_PIX_FMT_NAME, ":")
+//                   GET_PIX_FMT_NAME)
 
 DEF_CHOOSE_FORMAT(enum AVSampleFormat, sample_fmt, sample_fmts,
-                  AV_SAMPLE_FMT_NONE, GET_SAMPLE_FMT_NAME, ",")
+                  AV_SAMPLE_FMT_NONE, GET_SAMPLE_FMT_NAME)
 
 DEF_CHOOSE_FORMAT(int, sample_rate, supported_samplerates, 0,
-                  GET_SAMPLE_RATE_NAME, ",")
+                  GET_SAMPLE_RATE_NAME)
 
 DEF_CHOOSE_FORMAT(uint64_t, channel_layout, channel_layouts, 0,
-                  GET_CH_LAYOUT_NAME, ",")
+                  GET_CH_LAYOUT_NAME)
 
 FilterGraph *init_simple_filtergraph(InputStream *ist, OutputStream *ost)
 {
     FilterGraph *fg = av_mallocz(sizeof(*fg));
 
     if (!fg)
-        exit(1);
+        exit_program(1);
     fg->index = nb_filtergraphs;
 
     GROW_ARRAY(fg->outputs, fg->nb_outputs);
     if (!(fg->outputs[0] = av_mallocz(sizeof(*fg->outputs[0]))))
-        exit(1);
+        exit_program(1);
     fg->outputs[0]->ost   = ost;
     fg->outputs[0]->graph = fg;
 
@@ -191,7 +190,7 @@ FilterGraph *init_simple_filtergraph(InputStream *ist, OutputStream *ost)
 
     GROW_ARRAY(fg->inputs, fg->nb_inputs);
     if (!(fg->inputs[0] = av_mallocz(sizeof(*fg->inputs[0]))))
-        exit(1);
+        exit_program(1);
     fg->inputs[0]->ist   = ist;
     fg->inputs[0]->graph = fg;
 
@@ -214,7 +213,7 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
     if (type != AVMEDIA_TYPE_VIDEO && type != AVMEDIA_TYPE_AUDIO) {
         av_log(NULL, AV_LOG_FATAL, "Only video and audio filters supported "
                "currently.\n");
-        exit(1);
+        exit_program(1);
     }
 
     if (in->name) {
@@ -226,7 +225,7 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
         if (file_idx < 0 || file_idx >= nb_input_files) {
             av_log(NULL, AV_LOG_FATAL, "Invalid file index %d in filtergraph description %s.\n",
                    file_idx, fg->graph_desc);
-            exit(1);
+            exit_program(1);
         }
         s = input_files[file_idx]->ctx;
 
@@ -244,7 +243,7 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
         if (!st) {
             av_log(NULL, AV_LOG_FATAL, "Stream specifier '%s' in filtergraph description %s "
                    "matches no streams.\n", p, fg->graph_desc);
-            exit(1);
+            exit_program(1);
         }
         ist = input_streams[input_files[file_idx]->ist_index + st->index];
     } else {
@@ -258,7 +257,7 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
             av_log(NULL, AV_LOG_FATAL, "Cannot find a matching stream for "
                    "unlabeled input pad %d on filter %s\n", in->pad_idx,
                    in->filter_ctx->name);
-            exit(1);
+            exit_program(1);
         }
     }
     av_assert0(ist);
@@ -269,7 +268,7 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
 
     GROW_ARRAY(fg->inputs, fg->nb_inputs);
     if (!(fg->inputs[fg->nb_inputs - 1] = av_mallocz(sizeof(*fg->inputs[0]))))
-        exit(1);
+        exit_program(1);
     fg->inputs[fg->nb_inputs - 1]->ist   = ist;
     fg->inputs[fg->nb_inputs - 1]->graph = fg;
 
@@ -277,22 +276,72 @@ static void init_input_filter(FilterGraph *fg, AVFilterInOut *in)
     ist->filters[ist->nb_filters - 1] = fg->inputs[fg->nb_inputs - 1];
 }
 
+static int insert_trim(int64_t start_time, int64_t duration,
+                       AVFilterContext **last_filter, int *pad_idx,
+                       const char *filter_name)
+{
+    AVFilterGraph *graph = (*last_filter)->graph;
+    AVFilterContext *ctx;
+    const AVFilter *trim;
+    enum AVMediaType type = avfilter_pad_get_type((*last_filter)->output_pads, *pad_idx);
+    const char *name = (type == AVMEDIA_TYPE_VIDEO) ? "trim" : "atrim";
+    int ret = 0;
+
+    if (duration == INT64_MAX && start_time == AV_NOPTS_VALUE)
+        return 0;
+
+    trim = avfilter_get_by_name(name);
+    if (!trim) {
+        av_log(NULL, AV_LOG_ERROR, "%s filter not present, cannot limit "
+               "recording time.\n", name);
+        return AVERROR_FILTER_NOT_FOUND;
+    }
+
+    ctx = avfilter_graph_alloc_filter(graph, trim, filter_name);
+    if (!ctx)
+        return AVERROR(ENOMEM);
+
+    if (duration != INT64_MAX) {
+        ret = av_opt_set_int(ctx, "durationi", duration,
+                                AV_OPT_SEARCH_CHILDREN);
+    }
+    if (ret >= 0 && start_time != AV_NOPTS_VALUE) {
+        ret = av_opt_set_int(ctx, "starti", start_time,
+                                AV_OPT_SEARCH_CHILDREN);
+    }
+    if (ret < 0) {
+        av_log(ctx, AV_LOG_ERROR, "Error configuring the %s filter", name);
+        return ret;
+    }
+
+    ret = avfilter_init_str(ctx, NULL);
+    if (ret < 0)
+        return ret;
+
+    ret = avfilter_link(*last_filter, *pad_idx, ctx, 0);
+    if (ret < 0)
+        return ret;
+
+    *last_filter = ctx;
+    *pad_idx     = 0;
+    return 0;
+}
+
 static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter, AVFilterInOut *out)
 {
     char *pix_fmts;
     OutputStream *ost = ofilter->ost;
+    OutputFile    *of = output_files[ost->file_index];
     AVCodecContext *codec = ost->st->codec;
     AVFilterContext *last_filter = out->filter_ctx;
     int pad_idx = out->pad_idx;
     int ret;
     char name[255];
-    AVBufferSinkParams *buffersink_params = av_buffersink_params_alloc();
 
     snprintf(name, sizeof(name), "output stream %d:%d", ost->file_index, ost->index);
     ret = avfilter_graph_create_filter(&ofilter->filter,
                                        avfilter_get_by_name("buffersink"),
                                        name, NULL, NULL, fg->graph);
-    av_freep(&buffersink_params);
 
     if (ret < 0)
         return ret;
@@ -301,7 +350,7 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
         char args[255];
         AVFilterContext *filter;
 
-        snprintf(args, sizeof(args), "%d:%d:flags=0x%X",
+        snprintf(args, sizeof(args), "%d:%d:0x%X",
                  codec->width,
                  codec->height,
                  (unsigned)ost->sws_flags);
@@ -321,17 +370,18 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
         AVFilterContext *filter;
         snprintf(name, sizeof(name), "pixel format for output stream %d:%d",
                  ost->file_index, ost->index);
-        if ((ret = avfilter_graph_create_filter(&filter,
+        ret = avfilter_graph_create_filter(&filter,
                                                 avfilter_get_by_name("format"),
                                                 "format", pix_fmts, NULL,
-                                                fg->graph)) < 0)
+                                                fg->graph);
+        av_freep(&pix_fmts);
+        if (ret < 0)
             return ret;
         if ((ret = avfilter_link(last_filter, pad_idx, filter, 0)) < 0)
             return ret;
 
         last_filter = filter;
         pad_idx     = 0;
-        av_freep(&pix_fmts);
     }
 
     if (ost->frame_rate.num && 0) {
@@ -354,6 +404,14 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
         pad_idx = 0;
     }
 
+    snprintf(name, sizeof(name), "trim for output stream %d:%d",
+             ost->file_index, ost->index);
+    ret = insert_trim(of->start_time, of->recording_time,
+                      &last_filter, &pad_idx, name);
+    if (ret < 0)
+        return ret;
+
+
     if ((ret = avfilter_link(last_filter, pad_idx, ofilter->filter, 0)) < 0)
         return ret;
 
@@ -363,23 +421,21 @@ static int configure_output_video_filter(FilterGraph *fg, OutputFilter *ofilter,
 static int configure_output_audio_filter(FilterGraph *fg, OutputFilter *ofilter, AVFilterInOut *out)
 {
     OutputStream *ost = ofilter->ost;
+    OutputFile    *of = output_files[ost->file_index];
     AVCodecContext *codec  = ost->st->codec;
     AVFilterContext *last_filter = out->filter_ctx;
     int pad_idx = out->pad_idx;
     char *sample_fmts, *sample_rates, *channel_layouts;
     char name[255];
     int ret;
-    AVABufferSinkParams *params = av_abuffersink_params_alloc();
 
-    if (!params)
-        return AVERROR(ENOMEM);
-    params->all_channel_counts = 1;
     snprintf(name, sizeof(name), "output stream %d:%d", ost->file_index, ost->index);
     ret = avfilter_graph_create_filter(&ofilter->filter,
                                        avfilter_get_by_name("abuffersink"),
-                                       name, NULL, params, fg->graph);
-    av_freep(&params);
+                                       name, NULL, NULL, fg->graph);
     if (ret < 0)
+        return ret;
+    if ((ret = av_opt_set_int(ofilter->filter, "all_channel_counts", 1, AV_OPT_SEARCH_CHILDREN)) < 0)
         return ret;
 
 #define AUTO_INSERT_FILTER(opt_name, filter_name, arg) do {                 \
@@ -463,6 +519,27 @@ static int configure_output_audio_filter(FilterGraph *fg, OutputFilter *ofilter,
         AUTO_INSERT_FILTER("-vol", "volume", args);
     }
 
+    if (ost->apad && of->shortest) {
+        char args[256];
+        int i;
+
+        for (i=0; i<of->ctx->nb_streams; i++)
+            if (of->ctx->streams[i]->codec->codec_type == AVMEDIA_TYPE_VIDEO)
+                break;
+
+        if (i<of->ctx->nb_streams) {
+            snprintf(args, sizeof(args), "%s", ost->apad);
+            AUTO_INSERT_FILTER("-apad", "apad", args);
+        }
+    }
+
+    snprintf(name, sizeof(name), "trim for output stream %d:%d",
+             ost->file_index, ost->index);
+    ret = insert_trim(of->start_time, of->recording_time,
+                      &last_filter, &pad_idx, name);
+    if (ret < 0)
+        return ret;
+
     if ((ret = avfilter_link(last_filter, pad_idx, ofilter->filter, 0)) < 0)
         return ret;
 
@@ -473,11 +550,11 @@ static int configure_output_audio_filter(FilterGraph *fg, OutputFilter *ofilter,
 {                                                                  \
     AVFilterContext *ctx = inout->filter_ctx;                      \
     AVFilterPad *pads = in ? ctx->input_pads  : ctx->output_pads;  \
-    int       nb_pads = in ? ctx->input_count : ctx->output_count; \
+    int       nb_pads = in ? ctx->nb_inputs   : ctx->nb_outputs;   \
     AVIOContext *pb;                                               \
                                                                    \
     if (avio_open_dyn_buf(&pb) < 0)                                \
-        exit(1);                                                   \
+        exit_program(1);                                           \
                                                                    \
     avio_printf(pb, "%s", ctx->filter->name);                      \
     if (nb_pads > 1)                                               \
@@ -537,27 +614,25 @@ static int sub2video_prepare(InputStream *ist)
 static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
                                         AVFilterInOut *in)
 {
-    AVFilterContext *first_filter = in->filter_ctx;
-    AVFilter *filter = avfilter_get_by_name("buffer");
+    AVFilterContext *last_filter;
+    const AVFilter *buffer_filt = avfilter_get_by_name("buffer");
     InputStream *ist = ifilter->ist;
+    InputFile     *f = input_files[ist->file_index];
     AVRational tb = ist->framerate.num ? av_inv_q(ist->framerate) :
                                          ist->st->time_base;
-    AVRational fr = ist->framerate.num ? ist->framerate :
-                                         ist->st->r_frame_rate;
+    AVRational fr = ist->framerate;
     AVRational sar;
     AVBPrint args;
     char name[255];
-    int pad_idx = in->pad_idx;
-    int ret;
+    int ret, pad_idx = 0;
 
-    if (!ist->framerate.num && ist->st->codec->ticks_per_frame>1) {
-        AVRational codec_fr = av_inv_q(ist->st->codec->time_base);
-        AVRational   avg_fr = ist->st->avg_frame_rate;
-        codec_fr.den *= ist->st->codec->ticks_per_frame;
-        if (   codec_fr.num>0 && codec_fr.den>0 && av_q2d(codec_fr) < av_q2d(fr)*0.7
-            && fabs(1.0 - av_q2d(av_div_q(avg_fr, fr)))>0.1)
-            fr = codec_fr;
+    if (ist->st->codec->codec_type == AVMEDIA_TYPE_AUDIO) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot connect video filter to audio input\n");
+        return AVERROR(EINVAL);
     }
+
+    if (!fr.num)
+        fr = av_guess_frame_rate(input_files[ist->file_index]->ctx, ist->st, NULL);
 
     if (ist->st->codec->codec_type == AVMEDIA_TYPE_SUBTITLE) {
         ret = sub2video_prepare(ist);
@@ -582,9 +657,10 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
     snprintf(name, sizeof(name), "graph %d input from stream %d:%d", fg->index,
              ist->file_index, ist->st->index);
 
-    if ((ret = avfilter_graph_create_filter(&ifilter->filter, filter, name,
+    if ((ret = avfilter_graph_create_filter(&ifilter->filter, buffer_filt, name,
                                             args.str, NULL, fg->graph)) < 0)
         return ret;
+    last_filter = ifilter->filter;
 
     if (ist->framerate.num) {
         AVFilterContext *setpts;
@@ -597,11 +673,10 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
                                                 fg->graph)) < 0)
             return ret;
 
-        if ((ret = avfilter_link(setpts, 0, first_filter, pad_idx)) < 0)
+        if ((ret = avfilter_link(last_filter, 0, setpts, 0)) < 0)
             return ret;
 
-        first_filter = setpts;
-        pad_idx = 0;
+        last_filter = setpts;
     }
 
     if (do_deinterlace) {
@@ -615,14 +690,20 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
                                                 fg->graph)) < 0)
             return ret;
 
-        if ((ret = avfilter_link(yadif, 0, first_filter, pad_idx)) < 0)
+        if ((ret = avfilter_link(last_filter, 0, yadif, 0)) < 0)
             return ret;
 
-        first_filter = yadif;
-        pad_idx = 0;
+        last_filter = yadif;
     }
 
-    if ((ret = avfilter_link(ifilter->filter, 0, first_filter, pad_idx)) < 0)
+    snprintf(name, sizeof(name), "trim for input stream %d:%d",
+             ist->file_index, ist->st->index);
+    ret = insert_trim(((f->start_time == AV_NOPTS_VALUE) || !f->accurate_seek) ?
+                      AV_NOPTS_VALUE : 0, f->recording_time, &last_filter, &pad_idx, name);
+    if (ret < 0)
+        return ret;
+
+    if ((ret = avfilter_link(last_filter, 0, in->filter_ctx, in->pad_idx)) < 0)
         return ret;
     return 0;
 }
@@ -630,13 +711,18 @@ static int configure_input_video_filter(FilterGraph *fg, InputFilter *ifilter,
 static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
                                         AVFilterInOut *in)
 {
-    AVFilterContext *first_filter = in->filter_ctx;
-    AVFilter *filter = avfilter_get_by_name("abuffer");
+    AVFilterContext *last_filter;
+    const AVFilter *abuffer_filt = avfilter_get_by_name("abuffer");
     InputStream *ist = ifilter->ist;
-    int pad_idx = in->pad_idx;
+    InputFile     *f = input_files[ist->file_index];
     AVBPrint args;
     char name[255];
-    int ret;
+    int ret, pad_idx = 0;
+
+    if (ist->st->codec->codec_type != AVMEDIA_TYPE_AUDIO) {
+        av_log(NULL, AV_LOG_ERROR, "Cannot connect audio filter to non audio input\n");
+        return AVERROR(EINVAL);
+    }
 
     av_bprint_init(&args, 0, AV_BPRINT_SIZE_AUTOMATIC);
     av_bprintf(&args, "time_base=%d/%d:sample_rate=%d:sample_fmt=%s",
@@ -651,10 +737,11 @@ static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
     snprintf(name, sizeof(name), "graph %d input from stream %d:%d", fg->index,
              ist->file_index, ist->st->index);
 
-    if ((ret = avfilter_graph_create_filter(&ifilter->filter, filter,
+    if ((ret = avfilter_graph_create_filter(&ifilter->filter, abuffer_filt,
                                             name, args.str, NULL,
                                             fg->graph)) < 0)
         return ret;
+    last_filter = ifilter->filter;
 
 #define AUTO_INSERT_FILTER_INPUT(opt_name, filter_name, arg) do {                 \
     AVFilterContext *filt_ctx;                                              \
@@ -670,11 +757,11 @@ static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
     if (ret < 0)                                                            \
         return ret;                                                         \
                                                                             \
-    ret = avfilter_link(filt_ctx, 0, first_filter, pad_idx);                \
+    ret = avfilter_link(last_filter, 0, filt_ctx, 0);                       \
     if (ret < 0)                                                            \
         return ret;                                                         \
                                                                             \
-    first_filter = filt_ctx;                                                  \
+    last_filter = filt_ctx;                                                 \
 } while (0)
 
     if (audio_sync_method > 0) {
@@ -710,7 +797,15 @@ static int configure_input_audio_filter(FilterGraph *fg, InputFilter *ifilter,
         snprintf(args, sizeof(args), "%f", audio_volume / 256.);
         AUTO_INSERT_FILTER_INPUT("-vol", "volume", args);
     }
-    if ((ret = avfilter_link(ifilter->filter, 0, first_filter, pad_idx)) < 0)
+
+    snprintf(name, sizeof(name), "trim for input stream %d:%d",
+             ist->file_index, ist->st->index);
+    ret = insert_trim(((f->start_time == AV_NOPTS_VALUE) || !f->accurate_seek) ?
+                      AV_NOPTS_VALUE : 0, f->recording_time, &last_filter, &pad_idx, name);
+    if (ret < 0)
+        return ret;
+
+    if ((ret = avfilter_link(last_filter, 0, in->filter_ctx, in->pad_idx)) < 0)
         return ret;
 
     return 0;
@@ -798,7 +893,7 @@ int configure_filtergraph(FilterGraph *fg)
         for (cur = outputs; cur;) {
             GROW_ARRAY(fg->outputs, fg->nb_outputs);
             if (!(fg->outputs[fg->nb_outputs - 1] = av_mallocz(sizeof(*fg->outputs[0]))))
-                exit(1);
+                exit_program(1);
             fg->outputs[fg->nb_outputs - 1]->graph   = fg;
             fg->outputs[fg->nb_outputs - 1]->out_tmp = cur;
             cur = cur->next;

@@ -132,7 +132,7 @@ static void ape_dumpinfo(AVFormatContext * s, APEContext * ape_ctx)
                 av_log(s, AV_LOG_DEBUG, "%8d   %"PRIu32" (%"PRIu32" bytes)",
                        i, ape_ctx->seektable[i],
                        ape_ctx->seektable[i + 1] - ape_ctx->seektable[i]);
-                if (s->bittable)
+                if (ape_ctx->bittable)
                     av_log(s, AV_LOG_DEBUG, " + %2d bits\n",
                            ape_ctx->bittable[i]);
                 av_log(s, AV_LOG_DEBUG, "\n");
@@ -258,7 +258,7 @@ static int ape_read_header(AVFormatContext * s)
                ape->totalframes);
         return AVERROR_INVALIDDATA;
     }
-    if (ape->seektablelength && (ape->seektablelength / sizeof(*ape->seektable)) < ape->totalframes) {
+    if (ape->seektablelength / sizeof(*ape->seektable) < ape->totalframes) {
         av_log(s, AV_LOG_ERROR,
                "Number of seek entries is less than number of frames: %zu vs. %"PRIu32"\n",
                ape->seektablelength / sizeof(*ape->seektable), ape->totalframes);
@@ -281,18 +281,15 @@ static int ape_read_header(AVFormatContext * s)
         ape->seektable = av_malloc(ape->seektablelength);
         if (!ape->seektable)
             return AVERROR(ENOMEM);
-        for (i = 0; i < ape->seektablelength / sizeof(uint32_t); i++)
+        for (i = 0; i < ape->seektablelength / sizeof(uint32_t) && !pb->eof_reached; i++)
             ape->seektable[i] = avio_rl32(pb);
         if (ape->fileversion < 3810) {
             ape->bittable = av_malloc(ape->totalframes);
             if (!ape->bittable)
                 return AVERROR(ENOMEM);
-            for (i = 0; i < ape->totalframes; i++)
+            for (i = 0; i < ape->totalframes && !pb->eof_reached; i++)
                 ape->bittable[i] = avio_r8(pb);
         }
-    }else{
-        av_log(s, AV_LOG_ERROR, "Missing seektable\n");
-        return AVERROR_INVALIDDATA;
     }
 
     ape->frames[0].pos     = ape->firstframe;
@@ -414,6 +411,8 @@ static int ape_read_packet(AVFormatContext * s, AVPacket * pkt)
     AV_WL32(pkt->data    , nblocks);
     AV_WL32(pkt->data + 4, ape->frames[ape->currentframe].skip);
     ret = avio_read(s->pb, pkt->data + extra_size, ape->frames[ape->currentframe].size);
+    if (ret < 0)
+        return ret;
 
     pkt->pts = ape->frames[ape->currentframe].pts;
     pkt->stream_index = 0;

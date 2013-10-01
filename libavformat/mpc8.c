@@ -92,7 +92,7 @@ static int mpc8_probe(AVProbeData *p)
         if (size < 2)
             return 0;
         if (bs + size - 2 >= bs_end)
-            return AVPROBE_SCORE_MAX / 4 - 1; //seems to be valid MPC but no header yet
+            return AVPROBE_SCORE_EXTENSION - 1; // seems to be valid MPC but no header yet
         if (header_found) {
             if (size < 11 || size > 28)
                 return 0;
@@ -139,8 +139,8 @@ static void mpc8_parse_seektable(AVFormatContext *s, int64_t off)
     int i, t, seekd;
     GetBitContext gb;
 
-    if (s->nb_streams<=0) {
-        av_log(s, AV_LOG_ERROR, "cannot parse stream table before stream header\n");
+    if (s->nb_streams == 0) {
+        av_log(s, AV_LOG_ERROR, "No stream added before parsing seek table\n");
         return;
     }
 
@@ -151,7 +151,7 @@ static void mpc8_parse_seektable(AVFormatContext *s, int64_t off)
         return;
     }
     if (size > INT_MAX/10 || size<=0) {
-        av_log(s, AV_LOG_ERROR, "Seek table size is invalid\n");
+        av_log(s, AV_LOG_ERROR, "Bad seek table size\n");
         return;
     }
     if(!(buf = av_malloc(size + FF_INPUT_BUFFER_PADDING_SIZE)))

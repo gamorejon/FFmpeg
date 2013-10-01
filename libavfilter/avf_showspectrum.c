@@ -79,7 +79,7 @@ static const AVOption showspectrum_options[] = {
     { "log",  "logarithmic", 0, AV_OPT_TYPE_CONST, {.i64=LOG},    0, 0, FLAGS, "scale" },
     { "lin",  "linear",      0, AV_OPT_TYPE_CONST, {.i64=LINEAR}, 0, 0, FLAGS, "scale" },
     { "saturation", "color saturation multiplier", OFFSET(saturation), AV_OPT_TYPE_FLOAT, {.dbl = 1}, -10, 10, FLAGS },
-    { NULL },
+    { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(showspectrum);
@@ -96,20 +96,6 @@ static const struct {
     { 0.91, .95336363636363640, -.2045454545454546,  .03313636363636363 },
     {    1,                  1,                  0,                   0 }
 };
-
-static av_cold int init(AVFilterContext *ctx, const char *args)
-{
-    ShowSpectrumContext *showspectrum = ctx->priv;
-    int err;
-
-    showspectrum->class = &showspectrum_class;
-    av_opt_set_defaults(showspectrum);
-
-    if ((err = av_set_options_string(showspectrum, args, "=", ":")) < 0)
-        return err;
-
-    return 0;
-}
 
 static av_cold void uninit(AVFilterContext *ctx)
 {
@@ -225,9 +211,11 @@ static int config_output(AVFilterLink *outlink)
         if (!outpicref)
             return AVERROR(ENOMEM);
         outlink->sample_aspect_ratio = (AVRational){1,1};
-        memset(outpicref->data[0],   0, outlink->h * outpicref->linesize[0]);
-        memset(outpicref->data[1], 128, outlink->h * outpicref->linesize[1]);
-        memset(outpicref->data[2], 128, outlink->h * outpicref->linesize[2]);
+        for (i = 0; i < outlink->h; i++) {
+            memset(outpicref->data[0] + i * outpicref->linesize[0],   0, outlink->w);
+            memset(outpicref->data[1] + i * outpicref->linesize[1], 128, outlink->w);
+            memset(outpicref->data[2] + i * outpicref->linesize[2], 128, outlink->w);
+        }
     }
 
     if (showspectrum->xpos >= outlink->w)
@@ -503,13 +491,12 @@ static const AVFilterPad showspectrum_outputs[] = {
 };
 
 AVFilter avfilter_avf_showspectrum = {
-    .name           = "showspectrum",
-    .description    = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output."),
-    .init           = init,
-    .uninit         = uninit,
-    .query_formats  = query_formats,
-    .priv_size      = sizeof(ShowSpectrumContext),
-    .inputs         = showspectrum_inputs,
-    .outputs        = showspectrum_outputs,
-    .priv_class     = &showspectrum_class,
+    .name          = "showspectrum",
+    .description   = NULL_IF_CONFIG_SMALL("Convert input audio to a spectrum video output."),
+    .uninit        = uninit,
+    .query_formats = query_formats,
+    .priv_size     = sizeof(ShowSpectrumContext),
+    .inputs        = showspectrum_inputs,
+    .outputs       = showspectrum_outputs,
+    .priv_class    = &showspectrum_class,
 };

@@ -64,7 +64,7 @@
  *     int      bin_len;
  * } test_struct;
  *
- * static const AVOption options[] = {
+ * static const AVOption test_options[] = {
  *   { "test_int", "This is a test option of int type.", offsetof(test_struct, int_opt),
  *     AV_OPT_TYPE_INT, { .i64 = -1 }, INT_MIN, INT_MAX },
  *   { "test_str", "This is a test option of string type.", offsetof(test_struct, str_opt),
@@ -77,7 +77,7 @@
  * static const AVClass test_class = {
  *     .class_name = "test class",
  *     .item_name  = av_default_item_name,
- *     .option     = options,
+ *     .option     = test_options,
  *     .version    = LIBAVUTIL_VERSION_INT,
  * };
  * @endcode
@@ -163,7 +163,7 @@
  *
  * @subsection avoptions_implement_named_constants Named constants
  *      It is possible to create named constants for options. Simply set the unit
- *      field of the option the constants should apply to to a string and
+ *      field of the option the constants should apply to a string and
  *      create the constants themselves as options of type AV_OPT_TYPE_CONST
  *      with their unit field set to the same string.
  *      Their default_val field should contain the value of the named
@@ -232,6 +232,7 @@ enum AVOptionType{
     AV_OPT_TYPE_SAMPLE_FMT = MKBETAG('S','F','M','T'),
     AV_OPT_TYPE_VIDEO_RATE = MKBETAG('V','R','A','T'), ///< offset must point to AVRational
     AV_OPT_TYPE_DURATION   = MKBETAG('D','U','R',' '),
+    AV_OPT_TYPE_COLOR      = MKBETAG('C','O','L','R'),
 #if FF_API_OLD_AVOPTIONS
     FF_OPT_TYPE_FLAGS = 0,
     FF_OPT_TYPE_INT,
@@ -656,6 +657,22 @@ int av_opt_set_image_size(void *obj, const char *name, int w, int h, int search_
 int av_opt_set_pixel_fmt (void *obj, const char *name, enum AVPixelFormat fmt, int search_flags);
 int av_opt_set_sample_fmt(void *obj, const char *name, enum AVSampleFormat fmt, int search_flags);
 int av_opt_set_video_rate(void *obj, const char *name, AVRational val, int search_flags);
+
+/**
+ * Set a binary option to an integer list.
+ *
+ * @param obj    AVClass object to set options on
+ * @param name   name of the binary option
+ * @param val    pointer to an integer list (must have the correct type with
+ *               regard to the contents of the list)
+ * @param term   list terminator (usually 0 or -1)
+ * @param flags  search flags
+ */
+#define av_opt_set_int_list(obj, name, val, term, flags) \
+    (av_int_list_length(val, term) > INT_MAX / sizeof(*(val)) ? \
+     AVERROR(EINVAL) : \
+     av_opt_set_bin(obj, name, (const uint8_t *)(val), \
+                    av_int_list_length(val, term) * sizeof(*(val)), flags))
 /**
  * @}
  */

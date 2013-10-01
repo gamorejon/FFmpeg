@@ -64,7 +64,7 @@
 #define HIST_SIZE  ((ABS_UP_THRES - ABS_THRES) * HIST_GRAIN + 1)
 
 /**
- * An histogram is an array of HIST_SIZE hist_entry storing all the energies
+ * A histogram is an array of HIST_SIZE hist_entry storing all the energies
  * recorded (with an accuracy of 1/HIST_GRAIN) of the loudnesses from ABS_THRES
  * (at 0) to ABS_UP_THRES (at HIST_SIZE-1).
  * This fixed-size system avoids the need of a list of energies growing
@@ -128,7 +128,6 @@ typedef struct {
     /* misc */
     int loglevel;                   ///< log level for frame logging
     int metadata;                   ///< whether or not to inject loudness results in frames
-    int request_fulfilled;          ///< 1 if some audio just got pushed, 0 otherwise. FIXME: remove me
 } EBUR128Context;
 
 #define OFFSET(x) offsetof(EBUR128Context, x)
@@ -143,7 +142,7 @@ static const AVOption ebur128_options[] = {
         { "info",    "information logging level", 0, AV_OPT_TYPE_CONST, {.i64 = AV_LOG_INFO},    INT_MIN, INT_MAX, A|V|F, "level" },
         { "verbose", "verbose logging level",     0, AV_OPT_TYPE_CONST, {.i64 = AV_LOG_VERBOSE}, INT_MIN, INT_MAX, A|V|F, "level" },
     { "metadata", "inject metadata in the filtergraph", OFFSET(metadata), AV_OPT_TYPE_INT, {.i64 = 0}, 0, 1, A|V|F },
-    { NULL },
+    { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(ebur128);
@@ -317,6 +316,8 @@ static int config_video_output(AVFilterLink *outlink)
     DRAW_RECT(ebur128->graph);
     DRAW_RECT(ebur128->gauge);
 
+    outlink->flags |= FF_LINK_FLAG_REQUEST_LOOP;
+
     return 0;
 }
 
@@ -380,6 +381,8 @@ static int config_audio_output(AVFilterLink *outlink)
             return AVERROR(ENOMEM);
     }
 
+    outlink->flags |= FF_LINK_FLAG_REQUEST_LOOP;
+
     return 0;
 }
 
@@ -400,32 +403,10 @@ static struct hist_entry *get_histogram(void)
     return h;
 }
 
-/* This is currently necessary for the min/max samples to work properly.
- * FIXME: remove me when possible */
-static int audio_request_frame(AVFilterLink *outlink)
+static av_cold int init(AVFilterContext *ctx)
 {
-    int ret;
-    AVFilterContext *ctx = outlink->src;
-    EBUR128Context *ebur128 = ctx->priv;
-
-    ebur128->request_fulfilled = 0;
-    do {
-        ret = ff_request_frame(ctx->inputs[0]);
-    } while (!ebur128->request_fulfilled && ret >= 0);
-    return ret;
-}
-
-static av_cold int init(AVFilterContext *ctx, const char *args)
-{
-    int ret;
     EBUR128Context *ebur128 = ctx->priv;
     AVFilterPad pad;
-
-    ebur128->class = &ebur128_class;
-    av_opt_set_defaults(ebur128);
-
-    if ((ret = av_set_options_string(ebur128, args, "=", ":")) < 0)
-        return ret;
 
     if (ebur128->loglevel != AV_LOG_INFO &&
         ebur128->loglevel != AV_LOG_VERBOSE) {
@@ -463,8 +444,6 @@ static av_cold int init(AVFilterContext *ctx, const char *args)
         .type         = AVMEDIA_TYPE_AUDIO,
         .config_props = config_audio_output,
     };
-    if (ebur128->metadata)
-        pad.request_frame = audio_request_frame;
     if (!pad.name)
         return AVERROR(ENOMEM);
     ff_insert_outpad(ctx, ebur128->do_video, &pad);
@@ -717,7 +696,6 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *insamples)
         }
     }
 
-    ebur128->request_fulfilled = 1;
     return ff_filter_frame(ctx->outputs[ebur128->do_video], insamples);
 }
 
@@ -744,7 +722,7 @@ static int query_formats(AVFilterContext *ctx)
 
     /* set input and output audio formats
      * Note: ff_set_common_* functions are not used because they affect all the
-     * links, and thus break the video format negociation */
+     * links, and thus break the video format negotiation */
     formats = ff_make_format_list(sample_fmts);
     if (!formats)
         return AVERROR(ENOMEM);
@@ -795,16 +773,14 @@ static av_cold void uninit(AVFilterContext *ctx)
     for (i = 0; i < ctx->nb_outputs; i++)
         av_freep(&ctx->output_pads[i].name);
     av_frame_free(&ebur128->outpicref);
-    av_opt_free(ebur128);
 }
 
 static const AVFilterPad ebur128_inputs[] = {
     {
-        .name             = "default",
-        .type             = AVMEDIA_TYPE_AUDIO,
-        .get_audio_buffer = ff_null_get_audio_buffer,
-        .filter_frame     = filter_frame,
-        .config_props     = config_audio_input,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_AUDIO,
+        .filter_frame = filter_frame,
+        .config_props = config_audio_input,
     },
     { NULL }
 };
@@ -819,4 +795,5 @@ AVFilter avfilter_af_ebur128 = {
     .inputs        = ebur128_inputs,
     .outputs       = NULL,
     .priv_class    = &ebur128_class,
+    .flags         = AVFILTER_FLAG_DYNAMIC_OUTPUTS,
 };

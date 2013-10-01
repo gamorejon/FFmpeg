@@ -28,7 +28,6 @@
 
 #include "asv.h"
 #include "avcodec.h"
-#include "put_bits.h"
 #include "internal.h"
 #include "mathops.h"
 #include "mpeg12data.h"
@@ -271,6 +270,10 @@ static av_cold int decode_init(AVCodecContext *avctx)
     ASV1Context * const a = avctx->priv_data;
     const int scale       = avctx->codec_id == AV_CODEC_ID_ASV1 ? 1 : 2;
     int i;
+
+    if (avctx->extradata_size < 1) {
+        av_log(avctx, AV_LOG_WARNING, "No extradata provided\n");
+    }
 
     ff_asv_common_init(avctx);
     init_vlcs(a);

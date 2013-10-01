@@ -56,7 +56,7 @@ static const AVOption thumbnail_options[] = {
 
 AVFILTER_DEFINE_CLASS(thumbnail);
 
-static av_cold int init(AVFilterContext *ctx, const char *args)
+static av_cold int init(AVFilterContext *ctx)
 {
     ThumbContext *thumb = ctx->priv;
 
@@ -209,11 +209,10 @@ static int query_formats(AVFilterContext *ctx)
 
 static const AVFilterPad thumbnail_inputs[] = {
     {
-        .name             = "default",
-        .type             = AVMEDIA_TYPE_VIDEO,
-        .config_props     = config_props,
-        .get_video_buffer = ff_null_get_video_buffer,
-        .filter_frame     = filter_frame,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
+        .config_props = config_props,
+        .filter_frame = filter_frame,
     },
     { NULL }
 };
@@ -227,8 +226,6 @@ static const AVFilterPad thumbnail_outputs[] = {
     { NULL }
 };
 
-static const char *const shorthand[] = { "n", NULL };
-
 AVFilter avfilter_vf_thumbnail = {
     .name          = "thumbnail",
     .description   = NULL_IF_CONFIG_SMALL("Select the most representative frame in a given sequence of consecutive frames."),
@@ -239,5 +236,4 @@ AVFilter avfilter_vf_thumbnail = {
     .inputs        = thumbnail_inputs,
     .outputs       = thumbnail_outputs,
     .priv_class    = &thumbnail_class,
-    .shorthand     = shorthand,
 };

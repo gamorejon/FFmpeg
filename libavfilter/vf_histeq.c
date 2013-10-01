@@ -58,7 +58,6 @@ typedef struct {
     float strength;
     float intensity;
     enum HisteqAntibanding antibanding;
-    char* antibanding_str;
     int in_histogram [256];        ///< input histogram
     int out_histogram[256];        ///< output histogram
     int LUT[256];                  ///< lookup table derived from histogram[]
@@ -82,7 +81,7 @@ static const AVOption histeq_options[] = {
 
 AVFILTER_DEFINE_CLASS(histeq);
 
-static av_cold int init(AVFilterContext *ctx, const char *args)
+static av_cold int init(AVFilterContext *ctx)
 {
     HisteqContext *histeq = ctx->priv;
 
@@ -235,7 +234,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *inpic)
                 dst[x + histeq->rgba_map[R]] = r;
                 dst[x + histeq->rgba_map[G]] = g;
                 dst[x + histeq->rgba_map[B]] = b;
-                oluma = (55 * r + 182 * g + 19 * b) >> 8;
+                oluma = av_clip_uint8((55 * r + 182 * g + 19 * b) >> 8);
                 histeq->out_histogram[oluma]++;
             }
         }
@@ -253,23 +252,21 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *inpic)
 
 static const AVFilterPad histeq_inputs[] = {
     {
-        .name             = "default",
-        .type             = AVMEDIA_TYPE_VIDEO,
-        .config_props     = config_input,
-        .filter_frame     = filter_frame,
+        .name         = "default",
+        .type         = AVMEDIA_TYPE_VIDEO,
+        .config_props = config_input,
+        .filter_frame = filter_frame,
     },
     { NULL }
 };
 
 static const AVFilterPad histeq_outputs[] = {
     {
-        .name             = "default",
-        .type             = AVMEDIA_TYPE_VIDEO,
+        .name = "default",
+        .type = AVMEDIA_TYPE_VIDEO,
     },
     { NULL }
 };
-
-static const char *const shorthand[] = { "strength", "intensity", "antibanding", NULL };
 
 AVFilter avfilter_vf_histeq = {
     .name          = "histeq",
@@ -277,9 +274,8 @@ AVFilter avfilter_vf_histeq = {
     .priv_size     = sizeof(HisteqContext),
     .init          = init,
     .query_formats = query_formats,
-
     .inputs        = histeq_inputs,
     .outputs       = histeq_outputs,
     .priv_class    = &histeq_class,
-    .shorthand     = shorthand,
+    .flags         = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };

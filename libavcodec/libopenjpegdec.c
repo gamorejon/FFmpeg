@@ -59,10 +59,15 @@
                             AV_PIX_FMT_YUV420P16,AV_PIX_FMT_YUV422P16,AV_PIX_FMT_YUV444P16, \
                             AV_PIX_FMT_YUVA420P16,AV_PIX_FMT_YUVA422P16,AV_PIX_FMT_YUVA444P16
 
+#define XYZ_PIXEL_FORMATS  AV_PIX_FMT_XYZ12
+
 static const enum AVPixelFormat libopenjpeg_rgb_pix_fmts[]  = {RGB_PIXEL_FORMATS};
 static const enum AVPixelFormat libopenjpeg_gray_pix_fmts[] = {GRAY_PIXEL_FORMATS};
 static const enum AVPixelFormat libopenjpeg_yuv_pix_fmts[]  = {YUV_PIXEL_FORMATS};
-static const enum AVPixelFormat libopenjpeg_all_pix_fmts[]  = {RGB_PIXEL_FORMATS,GRAY_PIXEL_FORMATS,YUV_PIXEL_FORMATS};
+static const enum AVPixelFormat libopenjpeg_all_pix_fmts[]  = {RGB_PIXEL_FORMATS,
+                                                               GRAY_PIXEL_FORMATS,
+                                                               YUV_PIXEL_FORMATS,
+                                                               XYZ_PIXEL_FORMATS};
 
 typedef struct {
     AVClass *class;
@@ -202,12 +207,16 @@ static inline void libopenjpeg_copyto16(AVFrame *picture, opj_image_t *image) {
     int *comp_data;
     uint16_t *img_ptr;
     int index, x, y;
+    int adjust[4];
+    for (x = 0; x < image->numcomps; x++)
+        adjust[x] = FFMAX(FFMIN(16 - image->comps[x].prec, 8), 0);
+
     for (index = 0; index < image->numcomps; index++) {
         comp_data = image->comps[index].data;
         for (y = 0; y < image->comps[index].h; y++) {
             img_ptr = (uint16_t*) (picture->data[index] + y * picture->linesize[index]);
             for (x = 0; x < image->comps[index].w; x++) {
-                *img_ptr = *comp_data;
+                *img_ptr = *comp_data << adjust[index];
                 img_ptr++;
                 comp_data++;
             }
@@ -387,7 +396,7 @@ static const AVOption options[] = {
     { NULL },
 };
 
-static const AVClass class = {
+static const AVClass openjpeg_class = {
     .class_name = "libopenjpeg",
     .item_name  = av_default_item_name,
     .option     = options,
@@ -404,5 +413,5 @@ AVCodec ff_libopenjpeg_decoder = {
     .capabilities     = CODEC_CAP_DR1 | CODEC_CAP_FRAME_THREADS,
     .max_lowres       = 31,
     .long_name        = NULL_IF_CONFIG_SMALL("OpenJPEG JPEG 2000"),
-    .priv_class       = &class,
+    .priv_class       = &openjpeg_class,
 };

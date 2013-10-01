@@ -18,6 +18,7 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+#include "libavutil/internal.h"
 #include "avformat.h"
 #include "internal.h"
 #include "libavcodec/internal.h"
@@ -36,6 +37,7 @@
   #include <windows.h>
   #undef EXTERN_C
   #include "compat/avisynth/avisynth_c.h"
+  #include "compat/avisynth/avisynth_c_25.h"
   #define AVISYNTH_LIB "avisynth"
 #else
   #include <dlfcn.h>
@@ -62,19 +64,20 @@
 typedef struct {
     void *library;
 #define AVSC_DECLARE_FUNC(name) name##_func name
+    AVSC_DECLARE_FUNC(avs_bit_blt);
+    AVSC_DECLARE_FUNC(avs_clip_get_error);
     AVSC_DECLARE_FUNC(avs_create_script_environment);
     AVSC_DECLARE_FUNC(avs_delete_script_environment);
-    AVSC_DECLARE_FUNC(avs_get_error);
-    AVSC_DECLARE_FUNC(avs_clip_get_error);
-    AVSC_DECLARE_FUNC(avs_invoke);
-    AVSC_DECLARE_FUNC(avs_release_value);
-    AVSC_DECLARE_FUNC(avs_get_video_info);
-    AVSC_DECLARE_FUNC(avs_take_clip);
-    AVSC_DECLARE_FUNC(avs_release_clip);
-    AVSC_DECLARE_FUNC(avs_bit_blt);
     AVSC_DECLARE_FUNC(avs_get_audio);
+    AVSC_DECLARE_FUNC(avs_get_error);
     AVSC_DECLARE_FUNC(avs_get_frame);
+    AVSC_DECLARE_FUNC(avs_get_version);
+    AVSC_DECLARE_FUNC(avs_get_video_info);
+    AVSC_DECLARE_FUNC(avs_invoke);
+    AVSC_DECLARE_FUNC(avs_release_clip);
+    AVSC_DECLARE_FUNC(avs_release_value);
     AVSC_DECLARE_FUNC(avs_release_video_frame);
+    AVSC_DECLARE_FUNC(avs_take_clip);
 #undef AVSC_DECLARE_FUNC
 } AviSynthLibrary;
 
@@ -127,19 +130,20 @@ static av_cold int avisynth_load_library(void) {
     if(!continue_on_fail && !avs_library->name) \
         goto fail; \
 }
+    LOAD_AVS_FUNC(avs_bit_blt, 0);
+    LOAD_AVS_FUNC(avs_clip_get_error, 0);
     LOAD_AVS_FUNC(avs_create_script_environment, 0);
     LOAD_AVS_FUNC(avs_delete_script_environment, 0);
-    LOAD_AVS_FUNC(avs_get_error, 1); // New to AviSynth 2.6
-    LOAD_AVS_FUNC(avs_clip_get_error, 0);
-    LOAD_AVS_FUNC(avs_invoke, 0);
-    LOAD_AVS_FUNC(avs_release_value, 0);
-    LOAD_AVS_FUNC(avs_get_video_info, 0);
-    LOAD_AVS_FUNC(avs_take_clip, 0);
-    LOAD_AVS_FUNC(avs_release_clip, 0);
-    LOAD_AVS_FUNC(avs_bit_blt, 0);
     LOAD_AVS_FUNC(avs_get_audio, 0);
+    LOAD_AVS_FUNC(avs_get_error, 1); // New to AviSynth 2.6
     LOAD_AVS_FUNC(avs_get_frame, 0);
+    LOAD_AVS_FUNC(avs_get_version, 0);
+    LOAD_AVS_FUNC(avs_get_video_info, 0);
+    LOAD_AVS_FUNC(avs_invoke, 0);
+    LOAD_AVS_FUNC(avs_release_clip, 0);
+    LOAD_AVS_FUNC(avs_release_value, 0);
     LOAD_AVS_FUNC(avs_release_video_frame, 0);
+    LOAD_AVS_FUNC(avs_take_clip, 0);
 #undef LOAD_AVS_FUNC
 
     atexit(avisynth_atexit_handler);
@@ -164,24 +168,20 @@ static av_cold int avisynth_context_create(AVFormatContext *s) {
             return ret;
     }
 
-    if (!avs)
-        return AVERROR_UNKNOWN;
+    avs->env = avs_library->avs_create_script_environment(3);
+    if (avs_library->avs_get_error) {
+        const char *error = avs_library->avs_get_error(avs->env);
+        if (error) {
+            av_log(s, AV_LOG_ERROR, "%s\n", error);
+            return AVERROR_UNKNOWN;
+        }
+    }
 
     if (!avs_ctx_list) {
         avs_ctx_list = avs;
     } else {
         avs->next = avs_ctx_list;
         avs_ctx_list = avs;
-    }
-
-    avs->env = avs_library->avs_create_script_environment(3);
-    if (avs_library->avs_get_error) {
-        const char *error = avs_library->avs_get_error(avs->env);
-        if (error) {
-            av_log(s, AV_LOG_ERROR, "%s\n", error);
-            av_free(avs);
-            return AVERROR_UNKNOWN;
-        }
     }
 
     return 0;
@@ -243,37 +243,37 @@ static int avisynth_create_stream_video(AVFormatContext *s, AVStream *st) {
     switch (avs->vi->pixel_type) {
 #ifdef _WIN32
     case AVS_CS_YV24:
-        st->codec->pix_fmt = PIX_FMT_YUV444P;
+        st->codec->pix_fmt = AV_PIX_FMT_YUV444P;
         planar = 1;
         break;
     case AVS_CS_YV16:
-        st->codec->pix_fmt = PIX_FMT_YUV422P;
+        st->codec->pix_fmt = AV_PIX_FMT_YUV422P;
         planar = 1;
         break;
     case AVS_CS_YV411:
-        st->codec->pix_fmt = PIX_FMT_YUV411P;
+        st->codec->pix_fmt = AV_PIX_FMT_YUV411P;
         planar = 1;
         break;
     case AVS_CS_Y8:
-        st->codec->pix_fmt = PIX_FMT_GRAY8;
+        st->codec->pix_fmt = AV_PIX_FMT_GRAY8;
         planar = 2;
         break;
 #endif
     case AVS_CS_BGR24:
-        st->codec->pix_fmt = PIX_FMT_RGB24;
+        st->codec->pix_fmt = AV_PIX_FMT_BGR24;
         break;
     case AVS_CS_BGR32:
-        st->codec->pix_fmt = PIX_FMT_RGB32;
+        st->codec->pix_fmt = AV_PIX_FMT_RGB32;
         break;
     case AVS_CS_YUY2:
-        st->codec->pix_fmt = PIX_FMT_YUYV422;
+        st->codec->pix_fmt = AV_PIX_FMT_YUYV422;
         break;
     case AVS_CS_YV12:
-        st->codec->pix_fmt = PIX_FMT_YUV420P;
+        st->codec->pix_fmt = AV_PIX_FMT_YUV420P;
         planar = 1;
         break;
     case AVS_CS_I420: // Is this even used anywhere?
-        st->codec->pix_fmt = PIX_FMT_YUV420P;
+        st->codec->pix_fmt = AV_PIX_FMT_YUV420P;
         planar = 1;
         break;
     default:
@@ -359,11 +359,22 @@ static int avisynth_open_file(AVFormatContext *s) {
     AviSynthContext *avs = (AviSynthContext *)s->priv_data;
     AVS_Value arg, val;
     int ret;
+#ifdef _WIN32
+    char filename_ansi[MAX_PATH * 4];
+    wchar_t filename_wc[MAX_PATH * 4];
+#endif
 
     if (ret = avisynth_context_create(s))
         return ret;
 
+#ifdef _WIN32
+    // Convert UTF-8 to ANSI code page
+    MultiByteToWideChar(CP_UTF8, 0, s->filename, -1, filename_wc, MAX_PATH * 4);
+    WideCharToMultiByte(CP_THREAD_ACP, 0, filename_wc, -1, filename_ansi, MAX_PATH * 4, NULL, NULL);
+    arg = avs_new_value_string(filename_ansi);
+#else
     arg = avs_new_value_string(s->filename);
+#endif
     val = avs_library->avs_invoke(avs->env, "Import", arg, 0);
     if (avs_is_error(val)) {
         av_log(s, AV_LOG_ERROR, "%s\n", avs_as_error(val));
@@ -411,21 +422,21 @@ static void avisynth_next_stream(AVFormatContext *s, AVStream **st, AVPacket *pk
 static int avisynth_read_packet_video(AVFormatContext *s, AVPacket *pkt, int discard) {
     AviSynthContext *avs = s->priv_data;
     AVS_VideoFrame *frame;
-    unsigned char*  dst_p;
-    const unsigned char* src_p;
-    int i, plane, rowsize, planeheight, pitch, bits;
-    const char* error;
+    unsigned char *dst_p;
+    const unsigned char *src_p;
+    int n, i, plane, rowsize, planeheight, pitch, bits;
+    const char *error;
 
     if (avs->curr_frame >= avs->vi->num_frames)
         return AVERROR_EOF;
 
     // This must happen even if the stream is discarded to prevent desync.
-    avs->curr_frame++;
+    n = avs->curr_frame++;
     if (discard)
         return 0;
 
-    pkt->pts = avs->curr_frame;
-    pkt->dts = avs->curr_frame;
+    pkt->pts = n;
+    pkt->dts = n;
     pkt->duration = 1;
 
     // Define the bpp values for the new AviSynth 2.6 colorspaces
@@ -449,7 +460,7 @@ static int avisynth_read_packet_video(AVFormatContext *s, AVPacket *pkt, int dis
     if (!pkt->data)
         return AVERROR_UNKNOWN;
 
-    frame = avs_library->avs_get_frame(avs->clip, avs->curr_frame);
+    frame = avs_library->avs_get_frame(avs->clip, n);
     error = avs_library->avs_clip_get_error(avs->clip);
     if (error) {
         av_log(s, AV_LOG_ERROR, "%s\n", error);
@@ -462,9 +473,20 @@ static int avisynth_read_packet_video(AVFormatContext *s, AVPacket *pkt, int dis
     for (i = 0; i < avs->n_planes; i++) {
         plane = avs->planes[i];
         src_p = avs_get_read_ptr_p(frame, plane);
+        pitch = avs_get_pitch_p(frame, plane);
+
+#ifdef _WIN32
+        if (avs_library->avs_get_version(avs->clip) == 3) {
+            rowsize = avs_get_row_size_p_25(frame, plane);
+            planeheight = avs_get_height_p_25(frame, plane);
+        } else {
+            rowsize = avs_get_row_size_p(frame, plane);
+            planeheight = avs_get_height_p(frame, plane);
+        }
+#else
         rowsize = avs_get_row_size_p(frame, plane);
         planeheight = avs_get_height_p(frame, plane);
-        pitch = avs_get_pitch_p(frame, plane);
+#endif
 
         // Flip RGB video.
         if (avs_is_rgb24(avs->vi) || avs_is_rgb(avs->vi)) {
@@ -484,7 +506,8 @@ static int avisynth_read_packet_audio(AVFormatContext *s, AVPacket *pkt, int dis
     AviSynthContext *avs = s->priv_data;
     AVRational fps, samplerate;
     int samples;
-    const char* error;
+    int64_t n;
+    const char *error;
 
     if (avs->curr_sample >= avs->vi->num_audio_samples)
         return AVERROR_EOF;
@@ -514,12 +537,13 @@ static int avisynth_read_packet_audio(AVFormatContext *s, AVPacket *pkt, int dis
         samples = avs->vi->num_audio_samples - avs->curr_sample;
 
     // This must happen even if the stream is discarded to prevent desync.
+    n = avs->curr_sample;
     avs->curr_sample += samples;
     if (discard)
         return 0;
 
-    pkt->pts = avs->curr_sample;
-    pkt->dts = avs->curr_sample;
+    pkt->pts = n;
+    pkt->dts = n;
     pkt->duration = samples;
 
     pkt->size = avs_bytes_per_channel_sample(avs->vi) * samples * avs->vi->nchannels;
@@ -529,7 +553,7 @@ static int avisynth_read_packet_audio(AVFormatContext *s, AVPacket *pkt, int dis
     if (!pkt->data)
         return AVERROR_UNKNOWN;
 
-    avs_library->avs_get_audio(avs->clip, pkt->data, avs->curr_sample, samples);
+    avs_library->avs_get_audio(avs->clip, pkt->data, n, samples);
     error = avs_library->avs_clip_get_error(avs->clip);
     if (error) {
         av_log(s, AV_LOG_ERROR, "%s\n", error);

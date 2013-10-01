@@ -549,9 +549,15 @@ static int decode_residual(H264Context *h, GetBitContext *gb, int16_t *block, in
                 if(prefix<15){
                     level_code = (prefix<<suffix_length) + get_bits(gb, suffix_length);
                 }else{
-                    level_code = (15<<suffix_length) + get_bits(gb, prefix-3);
-                    if(prefix>=16)
+                    level_code = 15<<suffix_length;
+                    if (prefix>=16) {
+                        if(prefix > 25+3){
+                            av_log(h->avctx, AV_LOG_ERROR, "Invalid level prefix\n");
+                            return AVERROR_INVALIDDATA;
+                        }
                         level_code += (1<<(prefix-3))-4096;
+                    }
+                    level_code += get_bits(gb, prefix-3);
                 }
                 mask= -(level_code&1);
                 level_code= (((2+level_code)>>1) ^ mask) - mask;
@@ -706,7 +712,7 @@ int ff_h264_decode_mb_cavlc(H264Context *h){
                 down the code */
     if(h->slice_type_nos != AV_PICTURE_TYPE_I){
         if(h->mb_skip_run==-1)
-            h->mb_skip_run= get_ue_golomb(&h->gb);
+            h->mb_skip_run= get_ue_golomb_long(&h->gb);
 
         if (h->mb_skip_run--) {
             if(FRAME_MBAFF(h) && (h->mb_y&1) == 0){

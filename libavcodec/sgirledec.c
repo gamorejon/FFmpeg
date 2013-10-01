@@ -24,9 +24,7 @@
  * SGI RLE 8-bit decoder
  */
 
-#include "libavutil/intreadwrite.h"
 #include "avcodec.h"
-#include "bytestream.h"
 #include "internal.h"
 
 typedef struct SGIRLEContext {
@@ -44,7 +42,7 @@ static av_cold int sgirle_decode_init(AVCodecContext *avctx)
 }
 
 /**
- * Convert SGI RGB332 pixel into PIX_FMT_BGR8
+ * Convert SGI RGB332 pixel into AV_PIX_FMT_BGR8
  * SGI RGB332 is packed RGB 3:3:2, 8bpp, (msb)3R 2B 3G(lsb)
  */
 #define RGB332_TO_BGR8(x) (((x << 3) & 0xC0) | ((x << 3) & 0x38) | ((x >> 5) & 7))
@@ -84,6 +82,8 @@ static int decode_sgirle8(AVCodecContext *avctx, uint8_t *dst, const uint8_t *sr
         if (v > 0 && v < 0xC0) {
             do {
                 int length = FFMIN(v, width - x);
+                if (length <= 0)
+                    break;
                 memset(dst + y*linesize + x, RGB332_TO_BGR8(*src), length);
                 INC_XY(length);
                 v   -= length;
@@ -93,7 +93,7 @@ static int decode_sgirle8(AVCodecContext *avctx, uint8_t *dst, const uint8_t *sr
             v -= 0xC0;
             do {
                 int length = FFMIN3(v, width - x, src_end - src);
-                if (src_end - src < length)
+                if (src_end - src < length || length <= 0)
                     break;
                 memcpy_rgb332_to_bgr8(dst + y*linesize + x, src, length);
                 INC_XY(length);

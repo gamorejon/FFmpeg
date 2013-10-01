@@ -19,6 +19,12 @@
  * Foundation, Inc., 51 Franklin Street, Fifth Floor, Boston, MA 02110-1301 USA
  */
 
+/**
+ * @file
+ * Commodore CDXL video decoder
+ * @author Paul B Mahol
+ */
+
 #define UNCHECKED_BITSTREAM_READER 1
 
 #include "libavutil/intreadwrite.h"
@@ -285,7 +291,7 @@ static av_cold int cdxl_decode_end(AVCodecContext *avctx)
 {
     CDXLVideoContext *c = avctx->priv_data;
 
-    av_free(c->new_video);
+    av_freep(&c->new_video);
 
     return 0;
 }

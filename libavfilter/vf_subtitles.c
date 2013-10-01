@@ -85,7 +85,7 @@ static void ass_log(int ass_level, const char *fmt, va_list args, void *ctx)
     av_log(ctx, level, "\n");
 }
 
-static av_cold int init(AVFilterContext *ctx, const char *args)
+static av_cold int init(AVFilterContext *ctx)
 {
     AssContext *ass = ctx->priv;
 
@@ -201,8 +201,6 @@ static const AVFilterPad ass_outputs[] = {
     { NULL }
 };
 
-static const char *const shorthand[] = { "filename", NULL };
-
 #if CONFIG_ASS_FILTER
 
 static const AVOption ass_options[] = {
@@ -212,10 +210,10 @@ static const AVOption ass_options[] = {
 
 AVFILTER_DEFINE_CLASS(ass);
 
-static av_cold int init_ass(AVFilterContext *ctx, const char *args)
+static av_cold int init_ass(AVFilterContext *ctx)
 {
     AssContext *ass = ctx->priv;
-    int ret = init(ctx, args);
+    int ret = init(ctx);
 
     if (ret < 0)
         return ret;
@@ -240,7 +238,6 @@ AVFilter avfilter_vf_ass = {
     .inputs        = ass_inputs,
     .outputs       = ass_outputs,
     .priv_class    = &ass_class,
-    .shorthand     = shorthand,
 };
 #endif
 
@@ -254,7 +251,7 @@ static const AVOption subtitles_options[] = {
 
 AVFILTER_DEFINE_CLASS(subtitles);
 
-static av_cold int init_subtitles(AVFilterContext *ctx, const char *args)
+static av_cold int init_subtitles(AVFilterContext *ctx)
 {
     int ret, sid;
     AVDictionary *codec_opts = NULL;
@@ -267,7 +264,7 @@ static av_cold int init_subtitles(AVFilterContext *ctx, const char *args)
     AssContext *ass = ctx->priv;
 
     /* Init libass */
-    ret = init(ctx, args);
+    ret = init(ctx);
     if (ret < 0)
         return ret;
     ass->track = ass_new_track(ass->library);
@@ -305,7 +302,7 @@ static av_cold int init_subtitles(AVFilterContext *ctx, const char *args)
         return AVERROR(EINVAL);
     }
     dec_desc = avcodec_descriptor_get(dec_ctx->codec_id);
-    if (dec_desc && (dec_desc->props & AV_CODEC_PROP_BITMAP_SUB)) {
+    if (dec_desc && !(dec_desc->props & AV_CODEC_PROP_TEXT_SUB)) {
         av_log(ctx, AV_LOG_ERROR,
                "Only text based subtitles are currently supported\n");
         return AVERROR_PATCHWELCOME;
@@ -326,7 +323,7 @@ static av_cold int init_subtitles(AVFilterContext *ctx, const char *args)
     pkt.size = 0;
     while (av_read_frame(fmt, &pkt) >= 0) {
         int i, got_subtitle;
-        AVSubtitle sub;
+        AVSubtitle sub = {0};
 
         if (pkt.stream_index == sid) {
             ret = avcodec_decode_subtitle2(dec_ctx, &sub, &got_subtitle, &pkt);
@@ -365,6 +362,5 @@ AVFilter avfilter_vf_subtitles = {
     .inputs        = ass_inputs,
     .outputs       = ass_outputs,
     .priv_class    = &subtitles_class,
-    .shorthand     = shorthand,
 };
 #endif

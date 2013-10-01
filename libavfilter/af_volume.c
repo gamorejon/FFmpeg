@@ -51,12 +51,12 @@ static const AVOption volume_options[] = {
         { "fixed",  "select 8-bit fixed-point",     0, AV_OPT_TYPE_CONST, { .i64 = PRECISION_FIXED  }, INT_MIN, INT_MAX, A|F, "precision" },
         { "float",  "select 32-bit floating-point", 0, AV_OPT_TYPE_CONST, { .i64 = PRECISION_FLOAT  }, INT_MIN, INT_MAX, A|F, "precision" },
         { "double", "select 64-bit floating-point", 0, AV_OPT_TYPE_CONST, { .i64 = PRECISION_DOUBLE }, INT_MIN, INT_MAX, A|F, "precision" },
-    { NULL },
+    { NULL }
 };
 
 AVFILTER_DEFINE_CLASS(volume);
 
-static av_cold int init(AVFilterContext *ctx, const char *args)
+static av_cold int init(AVFilterContext *ctx)
 {
     VolumeContext *vol = ctx->priv;
 
@@ -80,8 +80,7 @@ static int query_formats(AVFilterContext *ctx)
     AVFilterFormats *formats = NULL;
     AVFilterChannelLayouts *layouts;
     static const enum AVSampleFormat sample_fmts[][7] = {
-        /* PRECISION_FIXED */
-        {
+        [PRECISION_FIXED] = {
             AV_SAMPLE_FMT_U8,
             AV_SAMPLE_FMT_U8P,
             AV_SAMPLE_FMT_S16,
@@ -90,14 +89,12 @@ static int query_formats(AVFilterContext *ctx)
             AV_SAMPLE_FMT_S32P,
             AV_SAMPLE_FMT_NONE
         },
-        /* PRECISION_FLOAT */
-        {
+        [PRECISION_FLOAT] = {
             AV_SAMPLE_FMT_FLT,
             AV_SAMPLE_FMT_FLTP,
             AV_SAMPLE_FMT_NONE
         },
-        /* PRECISION_DOUBLE */
-        {
+        [PRECISION_DOUBLE] = {
             AV_SAMPLE_FMT_DBL,
             AV_SAMPLE_FMT_DBLP,
             AV_SAMPLE_FMT_NONE
@@ -168,7 +165,7 @@ static inline void scale_samples_s32(uint8_t *dst, const uint8_t *src,
         smp_dst[i] = av_clipl_int32((((int64_t)smp_src[i] * volume + 128) >> 8));
 }
 
-static void volume_init(VolumeContext *vol)
+static av_cold void volume_init(VolumeContext *vol)
 {
     vol->samples_align = 1;
 
@@ -234,7 +231,7 @@ static int filter_frame(AVFilterLink *inlink, AVFrame *buf)
         out_buf = ff_get_audio_buffer(inlink, nb_samples);
         if (!out_buf)
             return AVERROR(ENOMEM);
-        out_buf->pts = buf->pts;
+        av_frame_copy_props(out_buf, buf);
     }
 
     if (vol->precision != PRECISION_FIXED || vol->volume_i > 0) {
@@ -290,16 +287,14 @@ static const AVFilterPad avfilter_af_volume_outputs[] = {
     { NULL }
 };
 
-static const char *const shorthand[] = { "volume", "precision", NULL };
-
 AVFilter avfilter_af_volume = {
     .name           = "volume",
     .description    = NULL_IF_CONFIG_SMALL("Change input volume."),
     .query_formats  = query_formats,
     .priv_size      = sizeof(VolumeContext),
+    .priv_class     = &volume_class,
     .init           = init,
     .inputs         = avfilter_af_volume_inputs,
     .outputs        = avfilter_af_volume_outputs,
-    .priv_class     = &volume_class,
-    .shorthand      = shorthand,
+    .flags          = AVFILTER_FLAG_SUPPORT_TIMELINE_GENERIC,
 };
