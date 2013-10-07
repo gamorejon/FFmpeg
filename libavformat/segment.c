@@ -104,7 +104,7 @@ typedef struct {
 
     int is_first_pkt;      ///< tells if it is the first packet in the segment
     void* zmq_context;     ///zmq context
-    void* zmq_out          ///zmq push socket
+    void* zmq_out;         ///zmq push socket
 } SegmentContext;
 
 static void print_csv_escaped_str(AVIOContext *ctx, const char *str)
@@ -280,12 +280,12 @@ static int zsegment_end(AVFormatContext *s, int write_trailer, int is_last)
     SegmentContext *seg = s->priv_data;
     AVFormatContext *oc = seg->avf;
     int ret = 0;
+    char filename[1024];
 
     av_write_frame(oc, NULL); /* Flush any buffered data (fragmented mp4) */
     if (write_trailer)
     {
         ret = av_write_trailer(oc);
-        char filename[1024];
         strncpy(filename, oc->filename, 1024);
         zmq_send (zmq_out, filename, strlen (filename), 0);
     }
@@ -686,12 +686,11 @@ static int zseg_write_header(AVFormatContext *s)
                               &s->interrupt_callback, NULL)) < 0)
             goto fail;
     }
-    int rc;
     seg->zmq_context = zmq_ctx_new ();
     seg->zmq_out = zmq_socket (seg->zmq_context, ZMQ_PUSH);
     assert(seg->zmq_out != NULL);
-    rc = zmq_bind (seg->zmq_out, "tcp://*:5556");
-    assert(rc == 0);
+    ret = zmq_bind (seg->zmq_out, "tcp://*:5556");
+    assert(ret == 0);
     zmq_send (zmq_out, "test msg", strlen ("test msg"), 0);
 
 
@@ -922,7 +921,7 @@ static int zseg_write_trailer(struct AVFormatContext *s)
     }
 fail:
     zmq_close (seg->zmq_out);
-    zmq_ctx_destroy (seg->context);
+    zmq_ctx_destroy (seg->zmq->context);
     if (seg->list)
         avio_close(seg->list_pb);
 
