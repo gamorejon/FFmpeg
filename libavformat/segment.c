@@ -39,6 +39,9 @@
 #include "libavutil/mathematics.h"
 #include "libavutil/timestamp.h"
 
+#include "assert.h"
+#include "zmq.h"
+
 typedef struct SegmentListEntry {
     int index;
     double start_time, end_time;
@@ -100,6 +103,8 @@ typedef struct {
     SegmentListEntry *segment_list_entries_end;
 
     int is_first_pkt;      ///< tells if it is the first packet in the segment
+    void* zmq_context;     ///zmq context
+    void* zmq_out          ///zmq push socket
 } SegmentContext;
 
 static void print_csv_escaped_str(AVIOContext *ctx, const char *str)
@@ -268,6 +273,67 @@ static void segment_list_print_entry(AVIOContext      *list_ioctx,
     default:
         av_assert0(!"Invalid list type");
     }
+}
+
+static int zsegment_end(AVFormatContext *s, int write_trailer, int is_last)
+{
+    SegmentContext *seg = s->priv_data;
+    AVFormatContext *oc = seg->avf;
+    int ret = 0;
+
+    av_write_frame(oc, NULL); /* Flush any buffered data (fragmented mp4) */
+    if (write_trailer)
+    {
+        ret = av_write_trailer(oc);
+        char filename[1024];
+        strncpy(filename, oc->filename, 1024);
+        zmq_send (zmq_out, filename, strlen (filename), 0);
+    }
+
+    if (ret < 0)
+        av_log(s, AV_LOG_ERROR, "Failure occurred when ending segment '%s'\n",
+               oc->filename);
+
+    if (seg->list) {
+        if (seg->list_size || seg->list_type == LIST_TYPE_M3U8) {
+            SegmentListEntry *entry = av_mallocz(sizeof(*entry));
+            if (!entry) {
+                ret = AVERROR(ENOMEM);
+                goto end;
+            }
+
+            /* append new element */
+            memcpy(entry, &seg->cur_entry, sizeof(*entry));
+            if (!seg->segment_list_entries)
+                seg->segment_list_entries = seg->segment_list_entries_end = entry;
+            else
+                seg->segment_list_entries_end->next = entry;
+            seg->segment_list_entries_end = entry;
+
+            /* drop first item */
+            if (seg->list_size && seg->segment_count > seg->list_size) {
+                entry = seg->segment_list_entries;
+                seg->segment_list_entries = seg->segment_list_entries->next;
+                av_freep(&entry);
+            }
+
+            avio_close(seg->list_pb);
+            if ((ret = segment_list_open(s)) < 0)
+                goto end;
+            for (entry = seg->segment_list_entries; entry; entry = entry->next)
+                segment_list_print_entry(seg->list_pb, seg->list_type, entry, s);
+            if (seg->list_type == LIST_TYPE_M3U8 && is_last)
+                avio_printf(seg->list_pb, "#EXT-X-ENDLIST\n");
+        } else {
+            segment_list_print_entry(seg->list_pb, seg->list_type, &seg->cur_entry, s);
+        }
+        avio_flush(seg->list_pb);
+    }
+
+end:
+    avio_close(oc->pb);
+
+    return ret;
 }
 
 static int segment_end(AVFormatContext *s, int write_trailer, int is_last)
@@ -520,6 +586,125 @@ static int select_reference_stream(AVFormatContext *s)
     return 0;
 }
 
+static int zseg_write_header(AVFormatContext *s)
+{
+    SegmentContext *seg = s->priv_data;
+    AVFormatContext *oc = NULL;
+    int ret;
+
+    seg->segment_count = 0;
+    if (!seg->write_header_trailer)
+        seg->individual_header_trailer = 0;
+
+    if (!!seg->time_str + !!seg->times_str + !!seg->frames_str > 1) {
+        av_log(s, AV_LOG_ERROR,
+               "segment_time, segment_times, and segment_frames options "
+               "are mutually exclusive, select just one of them\n");
+        return AVERROR(EINVAL);
+    }
+
+    if (seg->times_str) {
+        if ((ret = parse_times(s, &seg->times, &seg->nb_times, seg->times_str)) < 0)
+            return ret;
+    } else if (seg->frames_str) {
+        if ((ret = parse_frames(s, &seg->frames, &seg->nb_frames, seg->frames_str)) < 0)
+            return ret;
+    } else {
+        /* set default value if not specified */
+        if (!seg->time_str)
+            seg->time_str = av_strdup("2");
+        if ((ret = av_parse_time(&seg->time, seg->time_str, 1)) < 0) {
+            av_log(s, AV_LOG_ERROR,
+                   "Invalid time duration specification '%s' for segment_time option\n",
+                   seg->time_str);
+            return ret;
+        }
+    }
+
+    if (seg->list) {
+        if (seg->list_type == LIST_TYPE_UNDEFINED) {
+            if      (av_match_ext(seg->list, "csv" )) seg->list_type = LIST_TYPE_CSV;
+            else if (av_match_ext(seg->list, "ext" )) seg->list_type = LIST_TYPE_EXT;
+            else if (av_match_ext(seg->list, "m3u8")) seg->list_type = LIST_TYPE_M3U8;
+            else if (av_match_ext(seg->list, "ffcat,ffconcat")) seg->list_type = LIST_TYPE_FFCONCAT;
+            else                                      seg->list_type = LIST_TYPE_FLAT;
+        }
+        if ((ret = segment_list_open(s)) < 0)
+            goto fail;
+    }
+    if (seg->list_type == LIST_TYPE_EXT)
+        av_log(s, AV_LOG_WARNING, "'ext' list type option is deprecated in favor of 'csv'\n");
+
+    if ((ret = select_reference_stream(s)) < 0)
+        goto fail;
+    av_log(s, AV_LOG_VERBOSE, "Selected stream id:%d type:%s\n",
+           seg->reference_stream_index,
+           av_get_media_type_string(s->streams[seg->reference_stream_index]->codec->codec_type));
+
+    seg->oformat = av_guess_format(seg->format, s->filename, NULL);
+
+    if (!seg->oformat) {
+        ret = AVERROR_MUXER_NOT_FOUND;
+        goto fail;
+    }
+    if (seg->oformat->flags & AVFMT_NOFILE) {
+        av_log(s, AV_LOG_ERROR, "format %s not supported.\n",
+               seg->oformat->name);
+        ret = AVERROR(EINVAL);
+        goto fail;
+    }
+
+    if ((ret = segment_mux_init(s)) < 0)
+        goto fail;
+    oc = seg->avf;
+
+    if ((ret = set_segment_filename(s)) < 0)
+        goto fail;
+    seg->segment_count++;
+
+    if (seg->write_header_trailer) {
+        if ((ret = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
+                              &s->interrupt_callback, NULL)) < 0)
+            goto fail;
+    } else {
+        if ((ret = open_null_ctx(&oc->pb)) < 0)
+            goto fail;
+    }
+
+    if ((ret = avformat_write_header(oc, NULL)) < 0) {
+        avio_close(oc->pb);
+        goto fail;
+    }
+    seg->is_first_pkt = 1;
+
+    if (oc->avoid_negative_ts > 0 && s->avoid_negative_ts < 0)
+        s->avoid_negative_ts = 1;
+
+    if (!seg->write_header_trailer) {
+        close_null_ctx(oc->pb);
+        if ((ret = avio_open2(&oc->pb, oc->filename, AVIO_FLAG_WRITE,
+                              &s->interrupt_callback, NULL)) < 0)
+            goto fail;
+    }
+    int rc;
+    seg->zmq_context = zmq_ctx_new ();
+    seg->zmq_out = zmq_socket (seg->zmq_context, ZMQ_PUSH);
+    assert(seg->zmq_out != NULL);
+    rc = zmq_bind (seg->zmq_out, "tcp://*:5556");
+    assert(rc == 0);
+    zmq_send (zmq_out, "test msg", strlen ("test msg"), 0);
+
+
+fail:
+    if (ret) {
+        if (seg->list)
+            avio_close(seg->list_pb);
+        if (seg->avf)
+            avformat_free_context(seg->avf);
+    }
+    return ret;
+}
+
 static int seg_write_header(AVFormatContext *s)
 {
     SegmentContext *seg = s->priv_data;
@@ -719,6 +904,43 @@ fail:
     return ret;
 }
 
+static int zseg_write_trailer(struct AVFormatContext *s)
+{
+    SegmentContext *seg = s->priv_data;
+    AVFormatContext *oc = seg->avf;
+    SegmentListEntry *cur, *next;
+
+    int ret;
+    if (!seg->write_header_trailer) {
+        if ((ret = segment_end(s, 0, 1)) < 0)
+            goto fail;
+        open_null_ctx(&oc->pb);
+        ret = av_write_trailer(oc);
+        close_null_ctx(oc->pb);
+    } else {
+        ret = segment_end(s, 1, 1);
+    }
+fail:
+    zmq_close (seg->zmq_out);
+    zmq_ctx_destroy (seg->context);
+    if (seg->list)
+        avio_close(seg->list_pb);
+
+    av_opt_free(seg);
+    av_freep(&seg->times);
+    av_freep(&seg->frames);
+
+    cur = seg->segment_list_entries;
+    while (cur) {
+        next = cur->next;
+        av_free(cur);
+        cur = next;
+    }
+
+    avformat_free_context(oc);
+    return ret;
+}
+
 static int seg_write_trailer(struct AVFormatContext *s)
 {
     SegmentContext *seg = s->priv_data;
@@ -837,8 +1059,8 @@ AVOutputFormat ff_zmq_segment_muxer = {
     .long_name      = NULL_IF_CONFIG_SMALL("ZeroMQ segment muxer"),
     .priv_data_size = sizeof(SegmentContext),
     .flags          = AVFMT_NOFILE,
-    .write_header   = seg_write_header,
+    .write_header   = zseg_write_header,
     .write_packet   = seg_write_packet,
-    .write_trailer  = seg_write_trailer,
+    .write_trailer  = zseg_write_trailer,
     .priv_class     = &zseg_class,
 };
