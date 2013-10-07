@@ -691,7 +691,6 @@ static int zseg_write_header(AVFormatContext *s)
     assert(seg->zmq_out != NULL);
     ret = zmq_bind (seg->zmq_out, "tcp://*:5556");
     assert(ret == 0);
-    zmq_send (seg->zmq_out, "test msg", strlen ("test msg"), 0);
 
 
 fail:
@@ -846,6 +845,7 @@ static int seg_write_packet(AVFormatContext *s, AVPacket *pkt)
           av_compare_ts(pkt->pts, st->time_base,
                         end_pts-seg->time_delta, AV_TIME_BASE_Q) >= 0))) {
         ret = segment_end(s, seg->individual_header_trailer, 0);
+        zmq_send (seg->zmq_out, seg->avf->filename, strlen (seg->avf->filename), 0);
 
         if (!ret)
             ret = segment_start(s, seg->individual_header_trailer);
