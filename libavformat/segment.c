@@ -691,7 +691,7 @@ static int zseg_write_header(AVFormatContext *s)
     assert(seg->zmq_out != NULL);
     ret = zmq_bind (seg->zmq_out, "tcp://*:5556");
     assert(ret == 0);
-    zmq_send (zmq_out, "test msg", strlen ("test msg"), 0);
+    zmq_send (seg->zmq_out, "test msg", strlen ("test msg"), 0);
 
 
 fail:
