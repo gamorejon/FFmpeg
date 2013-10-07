@@ -287,7 +287,7 @@ static int zsegment_end(AVFormatContext *s, int write_trailer, int is_last)
     {
         ret = av_write_trailer(oc);
         strncpy(filename, oc->filename, 1024);
-        zmq_send (zmq_out, filename, strlen (filename), 0);
+        //zmq_send (zmq_out, filename, strlen (filename), 0);
     }
 
     if (ret < 0)
@@ -921,7 +921,7 @@ static int zseg_write_trailer(struct AVFormatContext *s)
     }
 fail:
     zmq_close (seg->zmq_out);
-    zmq_ctx_destroy (seg->zmq->context);
+    zmq_ctx_destroy (seg->zmq_context);
     if (seg->list)
         avio_close(seg->list_pb);
 
